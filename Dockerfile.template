@@ -1,0 +1,42 @@
+# debian base image
+FROM balenalib/%%BALENA_MACHINE_NAME%%-debian:buster-build as builder
+
+ENV OPENOCD_REPO  https://github.com/raspberrypi/openocd.git
+
+WORKDIR /usr/src/app
+
+## install required packages
+RUN install_packages \
+    git \
+    pkg-config \
+    autotools-dev \
+    autoconf \
+    automake \
+    texinfo \
+    libtool \
+    libtool-bin \
+    libusb-1.0
+
+COPY ./install.sh .
+# clone and install openocd
+RUN git clone --depth 1 --recursive ${OPENOCD_REPO} openocd-code && cd openocd-code && \
+    autoreconf -vfi || autoreconf -vfi && ./configure \
+      --enable-sysfsgpio --enable-bcm2835gpio  \
+    && make && make install
+RUN mkdir -p /usr/src/app/openocd/local/share && \
+    cp -R /usr/local/share/openocd /usr/src/app/openocd/local/share/ && \
+    cp /usr/local/bin/openocd /usr/src/app/openocd/ && \
+    cp /usr/src/app/install.sh /usr/src/app/openocd/ && cd /usr/src/app/openocd && \
+    tar -czf openocd.tar.gz * && mv openocd.tar.gz /usr/src/app/
+
+
+FROM balenalib/%%BALENA_MACHINE_NAME%%-debian:buster-run
+
+COPY --from=builder /usr/src/app/openocd.tar.gz /
+
+WORKDIR /
+
+RUN tar xzvf openocd.tar.gz
+
+CMD [ "./openocd", "-s", "./local/share/openocd/scripts", "-f", "interface/raspberrypi2-native.cfg", "-c", "transport select swd", "-f", "target/rp2040.cfg", "-c", "adapter speed 5000", "-c", "bindto 0.0.0.0" ]
+
